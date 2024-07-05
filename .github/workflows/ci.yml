@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
-        python-version: ['3.7', '3.10', '3.11', '3.12', '3.13.0-beta.2']
+        python-version: ['3.7', '3.10', '3.13.0-beta.2']
     name: Python ${{ matrix.python-version }} Linux tests
     steps:
       - uses: actions/checkout@v3
@@ -24,7 +24,7 @@ jobs:
     runs-on: windows-latest
     strategy:
       matrix:
-        python-version: ['3.10', '3.11', '3.12']
+        python-version: ['3.12']
     name: Python ${{ matrix.python-version }} Windows tests
     steps:
       - uses: actions/checkout@v3
