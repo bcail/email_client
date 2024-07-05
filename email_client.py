@@ -3,18 +3,20 @@ import sqlite3
 
 class Storage:
     DB_INIT_STATEMENTS = [
-        'CREATE TABLE emails ('
-            'id INTEGER PRIMARY KEY,'
-            'from_header TEXT NOT NULL,'
-            'body TEXT NOT NULL,'
-            'CHECK (from_header != "")'
-            ') STRICT',
         'CREATE TABLE folder ('
             'id INTEGER PRIMARY KEY,'
             'server_id TEXT NOT NULL,'
             'name TEXT NOT NULL,'
             'CHECK (server_id != "")'
             'CHECK (name != "")'
+            ') STRICT',
+        'CREATE TABLE emails ('
+            'id INTEGER PRIMARY KEY,'
+            'folder_id INTEGER NOT NULL,'
+            'from_header TEXT NOT NULL,'
+            'body TEXT NOT NULL,'
+            'CHECK (from_header != "")'
+            'FOREIGN KEY(folder_id) REFERENCES folders(id)'
             ') STRICT',
         'CREATE TABLE attachments ('
             'id INTEGER PRIMARY KEY,'
