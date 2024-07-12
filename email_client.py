@@ -1,4 +1,30 @@
+#!/usr/bin/env python3
+import json
+import os
 import sqlite3
+
+import requests
+
+# https://jmap.io/spec-core.html
+# https://jmap.io/client.html
+
+HEADERS = {'Authorization': f'Bearer {os.environ["TOKEN"]}'}
+
+
+def list_folders():
+    session_response = requests.get(os.environ['SESSION_URL'], headers=HEADERS)
+    account_id = session_response.json()['primaryAccounts']['urn:ietf:params:jmap:mail']
+    request = {'using': ['urn:ietf:params:jmap:mail'], 'methodCalls': [[ "Mailbox/get", {"accountId": account_id, "ids": None}, "0" ]]}
+    r = requests.post(session_response.json()['apiUrl'], data=json.dumps(request), headers={**HEADERS, 'Content-type': 'application/json'})
+    return [{'id': m['id'], 'name': m['name']} for m in r.json()['methodResponses'][0][1]['list']]
+
+
+def list_emails(folder_id, limit=10):
+    session_response = requests.get(os.environ['SESSION_URL'], headers=HEADERS)
+    method_calls = [[ "Email/query", { "filter": { "inMailboxes": [ folder_id ] }, "sort": [ "date desc", "id desc" ], "collapseThreads": False, "position": 0, "limit": 100 }, "0" ]]
+    request = {'using': ['urn:ietf:params:jmap:mail'], 'methodCalls': method_calls}
+    r = requests.post(session_response.json()['apiUrl'], data=json.dumps(request), headers={**HEADERS, 'Content-type': 'application/json'})
+    return r.json()['methodResponses']
 
 
 class Storage:
@@ -63,3 +89,9 @@ class Storage:
         tables = self._conn.execute('SELECT name from sqlite_master WHERE type="table"').fetchall()
         if not tables:
             self._create_tables()
+
+
+if __name__ == '__main__':
+    folders = list_folders()
+    print(folders)
+    print(list_emails(folders[0]['id']))
