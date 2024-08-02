@@ -59,13 +59,13 @@ def list_emails(api_url, account_id, folder_id, limit=10):
                 "path": "/list/*/emailIds",
                 "resultOf": "2"
             },
-            "properties": [ "subject" ]
+            "properties": [ "subject", "from" ]
         }, "3" ]
     ]
     request = {'using': ['urn:ietf:params:jmap:mail'], 'methodCalls': method_calls}
     r = requests.post(api_url, data=json.dumps(request), headers={**HEADERS, 'Content-type': 'application/json'})
-    for response in r.json()['methodResponses']:
-        print(response)
+    for email in r.json()['methodResponses'][3][1]['list']:
+        print(f'{email["id"]} -- {email["subject"]} -- {email["from"]}')
 
 
 class Storage:
