@@ -30,7 +30,7 @@ def list_emails(api_url, account_id, folder_id, limit=10):
             "accountId": account_id,
             "filter": {"inMailbox": folder_id},
             "sort": [{"property": "receivedAt", "isAscending": False }],
-            "collapseThreads": False, "position": 0, "limit": 2
+            "collapseThreads": False, "position": 0, "limit": 20
         }, "0" ],
         # Then we fetch the threadId of each of those messages
         [ "Email/get", {
@@ -64,8 +64,36 @@ def list_emails(api_url, account_id, folder_id, limit=10):
     ]
     request = {'using': ['urn:ietf:params:jmap:mail'], 'methodCalls': method_calls}
     r = requests.post(api_url, data=json.dumps(request), headers={**HEADERS, 'Content-type': 'application/json'})
-    for email in r.json()['methodResponses'][3][1]['list']:
-        print(f'{email["id"]} -- {email["subject"]} -- {email["from"]}')
+    email_data = [{'id': email['id'], 'subject': email['subject']} for email in r.json()['methodResponses'][3][1]['list']]
+    for index, email in enumerate(email_data):
+        print(f'{index} -- {email}')
+    while True:
+        response = input('select email (q to quit): ')
+        if response.lower() == 'q':
+            break
+        method_calls = [
+            [ "Email/get", {
+                "accountId": account_id,
+                "ids": [ email_data[int(response)]['id'] ],
+                "properties": [
+                    "blobId",
+                    "messageId",
+                    "inReplyTo",
+                    "references",
+                    "sender",
+                    "cc",
+                    "bcc",
+                    "replyTo",
+                    "sentAt",
+                    "textBody",
+                    "bodyValues"
+                ],
+                "fetchTextBodyValues": True
+            }, "0"]
+        ]
+        request = {'using': ['urn:ietf:params:jmap:mail'], 'methodCalls': method_calls}
+        r = requests.post(api_url, data=json.dumps(request), headers={**HEADERS, 'Content-type': 'application/json'})
+        print(list(r.json()['methodResponses'][0][1]['list'][0]['bodyValues'].values())[0]['value'])
 
 
 class Storage:
