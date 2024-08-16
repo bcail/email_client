@@ -8,97 +8,93 @@ import sqlite3
 # https://jmap.io/client.html
 
 
-HEADERS = {'Authorization': f'Bearer {os.environ.get("TOKEN", "")}'}
+class EmailServer:
+    HEADERS = {'Authorization': f'Bearer {os.environ["TOKEN"]}'}
 
+    def __init__(self):
+        session_response = requests.get(os.environ['SESSION_URL'], headers=self.HEADERS)
+        self.account_id = session_response.json()['primaryAccounts']['urn:ietf:params:jmap:mail']
+        self.api_url = session_response.json()['apiUrl']
 
-def connect_info():
-    session_response = requests.get(os.environ['SESSION_URL'], headers=HEADERS)
-    account_id = session_response.json()['primaryAccounts']['urn:ietf:params:jmap:mail']
-    api_url = session_response.json()['apiUrl']
-    return api_url, account_id
-
-
-def get_folders(api_url, account_id):
-    request = {
-        'using': ['urn:ietf:params:jmap:mail'],
-        'methodCalls': [
-            [ "Mailbox/get", {"accountId": account_id, "ids": None}, "0" ]
-        ],
-    }
-    r = requests.post(api_url, data=json.dumps(request), headers={**HEADERS, 'Content-type': 'application/json'})
-    method_responses = r.json()['methodResponses']
-    return [{'id': m['id'], 'name': m['name']} for m in method_responses[0][1]['list']]
-
-
-def get_emails(api_url, account_id, folder_id, limit=10):
-    method_calls = [
-        ["Email/query", {
-            "accountId": account_id,
-            "filter": {"inMailbox": folder_id},
-            "sort": [{"property": "receivedAt", "isAscending": False }],
-            "collapseThreads": False, "position": 0, "limit": 20
-        }, "0" ],
-        # Then we fetch the threadId of each of those messages
-        [ "Email/get", {
-            "accountId": account_id,
-            "#ids": {
-                "name": "Email/query",
-                "path": "/ids",
-                "resultOf": "0"
-            },
-            "properties": [ "threadId" ]
-        }, "1" ],
-        # Next we get the emailIds of the messages in those threads
-        [ "Thread/get", {
-            "accountId": account_id,
-            "#ids": {
-                "name": "Email/get",
-                "path": "/list/*/threadId",
-                "resultOf": "1"
-            }
-        }, "2" ],
-        # Finally we get the data for all those emails
-        [ "Email/get", {
-            "accountId": account_id,
-            "#ids": {
-                "name": "Thread/get",
-                "path": "/list/*/emailIds",
-                "resultOf": "2"
-            },
-            "properties": [ "subject", "from" ]
-        }, "3" ]
-    ]
-    request = {'using': ['urn:ietf:params:jmap:mail'], 'methodCalls': method_calls}
-    r = requests.post(api_url, data=json.dumps(request), headers={**HEADERS, 'Content-type': 'application/json'})
-    method_responses = r.json()['methodResponses']
-    return [{'id': email['id'], 'subject': email['subject']} for email in method_responses[3][1]['list']]
-
-
-def get_email_html_data(api_url, account_id, email_id):
-    method_calls = [
-        [ "Email/get", {
-            "accountId": account_id,
-            "ids": [ email_id ],
-            "properties": [
-                "blobId",
-                "messageId",
-                "inReplyTo",
-                "references",
-                "sender",
-                "cc",
-                "bcc",
-                "replyTo",
-                "sentAt",
-                "htmlBody",
-                "bodyValues"
+    def get_folders(self):
+        request = {
+            'using': ['urn:ietf:params:jmap:mail'],
+            'methodCalls': [
+                [ "Mailbox/get", {"accountId": self.account_id, "ids": None}, "0" ]
             ],
-            "fetchHTMLBodyValues": True
-        }, "0"]
-    ]
-    request = {'using': ['urn:ietf:params:jmap:mail'], 'methodCalls': method_calls}
-    r = requests.post(api_url, data=json.dumps(request), headers={**HEADERS, 'Content-type': 'application/json'})
-    method_responses = r.json()['methodResponses']
-    return list(method_responses[0][1]['list'][0]['bodyValues'].values())[0]['value']
+        }
+        r = requests.post(self.api_url, data=json.dumps(request), headers={**self.HEADERS, 'Content-type': 'application/json'})
+        method_responses = r.json()['methodResponses']
+        return [{'id': m['id'], 'name': m['name']} for m in method_responses[0][1]['list']]
+
+    def get_emails(self, folder_id, limit=10):
+        method_calls = [
+            ["Email/query", {
+                "accountId": self.account_id,
+                "filter": {"inMailbox": folder_id},
+                "sort": [{"property": "receivedAt", "isAscending": False }],
+                "collapseThreads": False, "position": 0, "limit": 20
+            }, "0" ],
+            # Then we fetch the threadId of each of those messages
+            [ "Email/get", {
+                "accountId": self.account_id,
+                "#ids": {
+                    "name": "Email/query",
+                    "path": "/ids",
+                    "resultOf": "0"
+                },
+                "properties": [ "threadId" ]
+            }, "1" ],
+            # Next we get the emailIds of the messages in those threads
+            [ "Thread/get", {
+                "accountId": self.account_id,
+                "#ids": {
+                    "name": "Email/get",
+                    "path": "/list/*/threadId",
+                    "resultOf": "1"
+                }
+            }, "2" ],
+            # Finally we get the data for all those emails
+            [ "Email/get", {
+                "accountId": self.account_id,
+                "#ids": {
+                    "name": "Thread/get",
+                    "path": "/list/*/emailIds",
+                    "resultOf": "2"
+                },
+                "properties": [ "subject", "from" ]
+            }, "3" ]
+        ]
+        request = {'using': ['urn:ietf:params:jmap:mail'], 'methodCalls': method_calls}
+        r = requests.post(self.api_url, data=json.dumps(request), headers={**self.HEADERS, 'Content-type': 'application/json'})
+        method_responses = r.json()['methodResponses']
+        return [{'id': email['id'], 'subject': email['subject']} for email in method_responses[3][1]['list']]
+
+    def get_email_html_data(self, email_id):
+        method_calls = [
+            [ "Email/get", {
+                "accountId": self.account_id,
+                "ids": [ email_id ],
+                "properties": [
+                    "blobId",
+                    "messageId",
+                    "inReplyTo",
+                    "references",
+                    "sender",
+                    "cc",
+                    "bcc",
+                    "replyTo",
+                    "sentAt",
+                    "htmlBody",
+                    "bodyValues"
+                ],
+                "fetchHTMLBodyValues": True
+            }, "0"]
+        ]
+        request = {'using': ['urn:ietf:params:jmap:mail'], 'methodCalls': method_calls}
+        r = requests.post(self.api_url, data=json.dumps(request), headers={**self.HEADERS, 'Content-type': 'application/json'})
+        method_responses = r.json()['methodResponses']
+        return list(method_responses[0][1]['list'][0]['bodyValues'].values())[0]['value']
 
 
 class Storage:
@@ -169,15 +165,15 @@ if __name__ == '__main__':
     import requests
     import markdownify
 
-    api_url, account_id = connect_info()
-    folders = get_folders(api_url, account_id)
+    server = EmailServer()
+    folders = server.get_folders()
     print(folders)
-    emails = get_emails(api_url, account_id, folders[0]['id'])
+    emails = server.get_emails(folders[0]['id'])
     for index, email in enumerate(emails):
         print(f'{index} -- {email}')
     while True:
         response = input('select email (q to quit): ')
         if response.lower() in ['q', '']:
             break
-        html_data = get_email_html_data(api_url, account_id, emails[int(response)]['id'])
+        html_data = server.get_email_html_data(emails[int(response)]['id'])
         print(markdownify.markdownify(html_data))
