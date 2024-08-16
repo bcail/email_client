@@ -9,12 +9,17 @@ import sqlite3
 
 
 class EmailServer:
-    HEADERS = {'Authorization': f'Bearer {os.environ.get("TOKEN", "")}'}
 
     def __init__(self):
-        session_response = requests.get(os.environ['SESSION_URL'], headers=self.HEADERS)
+        self._token = os.environ['TOKEN']
+        self._headers = {'Authorization': f'Bearer {self._token}', 'Content-type': 'application/json'}
+
+        session_response = requests.get(os.environ['SESSION_URL'], headers=self._headers)
         self.account_id = session_response.json()['primaryAccounts']['urn:ietf:params:jmap:mail']
         self.api_url = session_response.json()['apiUrl']
+
+    def _post_request(self, request):
+        return requests.post(self.api_url, data=json.dumps(request), headers=self._headers)
 
     def get_folders(self):
         request = {
@@ -23,7 +28,7 @@ class EmailServer:
                 [ "Mailbox/get", {"accountId": self.account_id, "ids": None}, "0" ]
             ],
         }
-        r = requests.post(self.api_url, data=json.dumps(request), headers={**self.HEADERS, 'Content-type': 'application/json'})
+        r = self._post_request(request)
         method_responses = r.json()['methodResponses']
         return [{'id': m['id'], 'name': m['name']} for m in method_responses[0][1]['list']]
 
@@ -66,7 +71,7 @@ class EmailServer:
             }, "3" ]
         ]
         request = {'using': ['urn:ietf:params:jmap:mail'], 'methodCalls': method_calls}
-        r = requests.post(self.api_url, data=json.dumps(request), headers={**self.HEADERS, 'Content-type': 'application/json'})
+        r = self._post_request(request)
         method_responses = r.json()['methodResponses']
         return [{'id': email['id'], 'subject': email['subject']} for email in method_responses[3][1]['list']]
 
@@ -92,7 +97,7 @@ class EmailServer:
             }, "0"]
         ]
         request = {'using': ['urn:ietf:params:jmap:mail'], 'methodCalls': method_calls}
-        r = requests.post(self.api_url, data=json.dumps(request), headers={**self.HEADERS, 'Content-type': 'application/json'})
+        r = self._post_request(request)
         method_responses = r.json()['methodResponses']
         return list(method_responses[0][1]['list'][0]['bodyValues'].values())[0]['value']
 
