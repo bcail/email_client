@@ -9,7 +9,7 @@ import sqlite3
 
 
 class EmailServer:
-    HEADERS = {'Authorization': f'Bearer {os.environ["TOKEN"]}'}
+    HEADERS = {'Authorization': f'Bearer {os.environ.get("TOKEN", "")}'}
 
     def __init__(self):
         session_response = requests.get(os.environ['SESSION_URL'], headers=self.HEADERS)
