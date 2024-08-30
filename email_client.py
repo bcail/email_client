@@ -46,7 +46,7 @@ class EmailServer:
         }
         r = self._post_request(request)
         method_responses = r.json()['methodResponses']
-        return [{'id': m['id'], 'name': m['name'], 'role': m['role'], 'parent_id': m['parentId']} for m in method_responses[0][1]['list']]
+        return [{'id': m['id'], 'name': m['name'], 'role': m['role'], 'parent_id': m['parentId'], 'sort_order': m['sortOrder']} for m in method_responses[0][1]['list']]
 
     def get_emails(self, folder_id, limit=10):
         method_calls = [
@@ -137,6 +137,7 @@ class Storage:
             'name TEXT NOT NULL,'
             'parent_server_id TEXT NULL,'
             'role TEXT NULL,'
+            'sort_order INTEGER NOT NULL DEFAULT 0,'
             'CHECK (server_id != ""),'
             'CHECK (name != ""),'
             'CHECK (parent_server_id != ""),'
@@ -183,14 +184,21 @@ class Storage:
         if int(result[0]) > 0:
             return True
 
-    def save_folder(self, folder_id, name, role, parent_id):
+    def save_folder(self, folder_id, name, role, parent_id, sort_order=0):
         cursor = self._conn.cursor()
         with sqlite_txn(cursor):
-            cursor.execute('INSERT INTO folders(server_id, name, role, parent_server_id) VALUES(?, ?, ?, ?)', (folder_id, name, role, parent_id))
+            cursor.execute('INSERT INTO folders(server_id, name, role, parent_server_id, sort_order) VALUES(?, ?, ?, ?, ?)',
+                           (folder_id, name, role, parent_id, sort_order))
 
-    def get_folders(self):
-        results = self._conn.execute('SELECT server_id,name FROM folders ORDER BY name').fetchall()
-        return [{'id': r[0], 'name': r[1]} for r in results]
+    def get_folders(self, parent_id=None):
+        fields = 'server_id, name'
+        folders = []
+        if parent_id:
+            results = self._conn.execute(f'SELECT {fields} FROM folders WHERE parent_server_id = ? ORDER BY sort_order,name', (parent_id,)).fetchall()
+        else:
+            results = self._conn.execute(f'SELECT {fields} FROM folders WHERE parent_server_id IS NULL ORDER BY sort_order,name').fetchall()
+        folders.extend([{'id': r[0], 'name': r[1]} for r in results])
+        return folders
 
 
 if __name__ == '__main__':
@@ -206,7 +214,7 @@ if __name__ == '__main__':
         print(f'Fetching folders...')
         folders = server.get_folders()
         for f in folders:
-            storage.save_folder(folder_id=f['id'], name=f['name'], role=f['role'], parent_id=f['parent_id'])
+            storage.save_folder(folder_id=f['id'], name=f['name'], role=f['role'], parent_id=f['parent_id'], sort_order=f['sort_order'])
 
     folders = storage.get_folders()
     for f in folders:

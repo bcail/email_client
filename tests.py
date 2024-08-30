@@ -3,7 +3,7 @@ import unittest
 import email_client
 
 
-class Tests(unittest.TestCase):
+class StorageTests(unittest.TestCase):
     def test(self):
         storage = email_client.Storage(':memory:')
 
