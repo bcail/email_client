@@ -14,13 +14,28 @@ class EmailServer:
     def __init__(self):
         self._token = os.environ['TOKEN']
         self._headers = {'Authorization': f'Bearer {self._token}', 'Content-type': 'application/json'}
+        self._account_id = None
+        self._api_url = None
 
+    def _init_session(self):
         session_response = requests.get(os.environ['SESSION_URL'], headers=self._headers)
-        self.account_id = session_response.json()['primaryAccounts']['urn:ietf:params:jmap:mail']
-        self.api_url = session_response.json()['apiUrl']
+        self._account_id = session_response.json()['primaryAccounts']['urn:ietf:params:jmap:mail']
+        self._api_url = session_response.json()['apiUrl']
 
     def _post_request(self, request):
         return requests.post(self.api_url, data=json.dumps(request), headers=self._headers)
+
+    @property
+    def account_id(self):
+        if not self._account_id:
+            self._init_session()
+        return self._account_id
+
+    @property
+    def api_url(self):
+        if not self._api_url:
+            self._init_session()
+        return self._api_url
 
     def get_folders(self):
         request = {
