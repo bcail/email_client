@@ -19,8 +19,10 @@ class EmailServer:
 
     def _init_session(self):
         session_response = requests.get(os.environ['SESSION_URL'], headers=self._headers)
-        self._account_id = session_response.json()['primaryAccounts']['urn:ietf:params:jmap:mail']
-        self._api_url = session_response.json()['apiUrl']
+        session_info = session_response.json()
+        self._account_id = session_info['primaryAccounts']['urn:ietf:params:jmap:mail']
+        self._api_url = session_info['apiUrl']
+        print(f'init session state {session_info["state"]}')
 
     def _post_request(self, request):
         return requests.post(self.api_url, data=json.dumps(request), headers=self._headers)
@@ -45,8 +47,11 @@ class EmailServer:
             ],
         }
         r = self._post_request(request)
-        method_responses = r.json()['methodResponses']
-        return [{'id': m['id'], 'name': m['name'], 'role': m['role'], 'parent_id': m['parentId'], 'sort_order': m['sortOrder']} for m in method_responses[0][1]['list']]
+        folders_info = r.json()
+        method_responses = folders_info['methodResponses']
+        state = folders_info['sessionState']
+        print(f'sessionState {state}')
+        return state, [{'id': m['id'], 'name': m['name'], 'role': m['role'], 'parent_id': m['parentId'], 'sort_order': m['sortOrder']} for m in method_responses[0][1]['list']]
 
     def get_emails(self, folder_id, limit=10):
         method_calls = [
@@ -157,6 +162,12 @@ class Storage:
             'data BLOB NOT NULL,'
             'FOREIGN KEY(email_id) REFERENCES emails(id)'
             ') STRICT',
+        'CREATE TABLE misc ('
+            'key TEXT UNIQUE NOT NULL,'
+            'value TEXT NOT NULL,'
+            'CHECK (key != "")'
+            'CHECK (value != "")'
+            ') STRICT',
     ]
 
     @staticmethod
@@ -184,11 +195,13 @@ class Storage:
         if int(result[0]) > 0:
             return True
 
-    def save_folder(self, folder_id, name, role, parent_id, sort_order=0):
+    def save_folders(self, folders, state):
         cursor = self._conn.cursor()
         with sqlite_txn(cursor):
-            cursor.execute('INSERT INTO folders(server_id, name, role, parent_server_id, sort_order) VALUES(?, ?, ?, ?, ?)',
-                           (folder_id, name, role, parent_id, sort_order))
+            for f in folders:
+                cursor.execute('INSERT INTO folders(server_id, name, role, parent_server_id, sort_order) VALUES(?, ?, ?, ?, ?)',
+                               (f['id'], f['name'], f['role'], f['parent_id'], f['sort_order']))
+            cursor.execute('INSERT INTO misc(key, value) VALUES(?, ?)', ('folder-state', state))
 
     def get_folders(self, parent_id=None):
         fields = 'server_id, name'
@@ -212,9 +225,8 @@ if __name__ == '__main__':
 
     if not storage.has_folders:
         print(f'Fetching folders...')
-        folders = server.get_folders()
-        for f in folders:
-            storage.save_folder(folder_id=f['id'], name=f['name'], role=f['role'], parent_id=f['parent_id'], sort_order=f['sort_order'])
+        state, folders = server.get_folders()
+        storage.save_folders(folders, state)
 
     folders = storage.get_folders()
     for f in folders:
