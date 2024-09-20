@@ -16,13 +16,14 @@ class EmailServer:
         self._headers = {'Authorization': f'Bearer {self._token}', 'Content-type': 'application/json'}
         self._account_id = None
         self._api_url = None
+        self._initial_state = None
 
     def _init_session(self):
         session_response = requests.get(os.environ['SESSION_URL'], headers=self._headers)
         session_info = session_response.json()
         self._account_id = session_info['primaryAccounts']['urn:ietf:params:jmap:mail']
         self._api_url = session_info['apiUrl']
-        print(f'init session state {session_info["state"]}')
+        self._initial_state = session_info['state']
 
     def _post_request(self, request):
         return requests.post(self.api_url, data=json.dumps(request), headers=self._headers)
@@ -39,6 +40,12 @@ class EmailServer:
             self._init_session()
         return self._api_url
 
+    @property
+    def initial_state(self):
+        if not self._initial_state:
+            self._init_session()
+        return self._initial_state
+
     def get_folders(self):
         request = {
             'using': ['urn:ietf:params:jmap:mail'],
@@ -50,7 +57,6 @@ class EmailServer:
         folders_info = r.json()
         method_responses = folders_info['methodResponses']
         state = folders_info['sessionState']
-        print(f'sessionState {state}')
         return state, [{'id': m['id'], 'name': m['name'], 'role': m['role'], 'parent_id': m['parentId'], 'sort_order': m['sortOrder']} for m in method_responses[0][1]['list']]
 
     def get_emails(self, folder_id, limit=10):
@@ -195,13 +201,24 @@ class Storage:
         if int(result[0]) > 0:
             return True
 
+    @property
+    def folders_state(self):
+        result = self._conn.execute("SELECT value FROM misc WHERE key = 'folders-state'").fetchone()
+        return result[0]
+
+    def delete_folders(self):
+        cursor = self._conn.cursor()
+        with sqlite_txn(cursor):
+            cursor.execute("DELETE FROM misc WHERE key = 'folders-state'")
+            cursor.execute('DELETE FROM folders')
+
     def save_folders(self, folders, state):
         cursor = self._conn.cursor()
         with sqlite_txn(cursor):
             for f in folders:
                 cursor.execute('INSERT INTO folders(server_id, name, role, parent_server_id, sort_order) VALUES(?, ?, ?, ?, ?)',
                                (f['id'], f['name'], f['role'], f['parent_id'], f['sort_order']))
-            cursor.execute('INSERT INTO misc(key, value) VALUES(?, ?)', ('folder-state', state))
+            cursor.execute('INSERT INTO misc(key, value) VALUES(?, ?)', ('folders-state', state))
 
     def get_folders(self, parent_id=None):
         fields = 'server_id, name'
@@ -224,9 +241,17 @@ if __name__ == '__main__':
     server = EmailServer()
 
     if not storage.has_folders:
-        print(f'Fetching folders...')
+        print(f'Fetching folders for the first time...')
         state, folders = server.get_folders()
         storage.save_folders(folders, state)
+    elif server.initial_state != storage.folders_state:
+        print(f'Folders may have changed - re-fetching...')
+        print(f'server state "{server.initial_state}"; storage state: "{storage.folders_state}"')
+        storage.delete_folders()
+        state, folders = server.get_folders()
+        storage.save_folders(folders, state)
+    else:
+        print(f'No folder changes to fetch.')
 
     folders = storage.get_folders()
     for f in folders:
