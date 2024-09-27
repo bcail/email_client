@@ -16,17 +16,26 @@ class EmailServer:
         self._headers = {'Authorization': f'Bearer {self._token}', 'Content-type': 'application/json'}
         self._account_id = None
         self._api_url = None
-        self._initial_state = None
 
     def _init_session(self):
         session_response = requests.get(os.environ['SESSION_URL'], headers=self._headers)
         session_info = session_response.json()
         self._account_id = session_info['primaryAccounts']['urn:ietf:params:jmap:mail']
         self._api_url = session_info['apiUrl']
-        self._initial_state = session_info['state']
 
-    def _post_request(self, request):
-        return requests.post(self.api_url, data=json.dumps(request), headers=self._headers)
+    def _post_request(self, method_calls):
+        request = {
+            'using': [
+                'urn:ietf:params:jmap:core',
+                'urn:ietf:params:jmap:mail',
+            ],
+            'methodCalls': method_calls,
+        }
+        r = requests.post(self.api_url, data=json.dumps(request), headers=self._headers)
+        if r.ok:
+            return r
+        else:
+            raise Exception(f'server error: {r.status_code} -- {r.content.decode("utf8")}')
 
     @property
     def account_id(self):
@@ -40,24 +49,32 @@ class EmailServer:
             self._init_session()
         return self._api_url
 
-    @property
-    def initial_state(self):
-        if not self._initial_state:
-            self._init_session()
-        return self._initial_state
-
     def get_folders(self):
-        request = {
-            'using': ['urn:ietf:params:jmap:mail'],
-            'methodCalls': [
-                [ "Mailbox/get", {"accountId": self.account_id, "ids": None}, "0" ]
-            ],
-        }
-        r = self._post_request(request)
+        method_calls = [
+            [ 'Mailbox/get', {'accountId': self.account_id, 'ids': None}, '0' ],
+        ]
+        r = self._post_request(method_calls)
         folders_info = r.json()
         method_responses = folders_info['methodResponses']
-        state = folders_info['sessionState']
-        return state, [{'id': m['id'], 'name': m['name'], 'role': m['role'], 'parent_id': m['parentId'], 'sort_order': m['sortOrder']} for m in method_responses[0][1]['list']]
+        mailbox_get_info = method_responses[0][1]
+        state = mailbox_get_info['state']
+        return state, [{'id': m['id'], 'name': m['name'], 'role': m['role'], 'parent_id': m['parentId'], 'sort_order': m['sortOrder']} for m in mailbox_get_info['list']]
+
+    def get_folder_changes(self, state):
+        method_calls = [
+            ['Mailbox/changes', {'accountId': self.account_id, 'sinceState': state}, '0'],
+            # ['Mailbox/get', {'#ids': { 'resultOf': '0', 'name': 'Mailbox/changes', 'path': '/created' }}, '1'],
+        ]
+        r = self._post_request(method_calls)
+        method_responses = r.json()['methodResponses']
+        mailbox_changes_info = method_responses[0][1]
+        new_state = mailbox_changes_info['newState']
+        changes = {
+            'created': mailbox_changes_info['created'],
+            'destroyed': mailbox_changes_info['destroyed'],
+            'updated': mailbox_changes_info['updated'],
+        }
+        return new_state, changes
 
     def get_emails(self, folder_id, limit=10):
         method_calls = [
@@ -97,8 +114,7 @@ class EmailServer:
                 "properties": [ "subject", "from" ]
             }, "3" ]
         ]
-        request = {'using': ['urn:ietf:params:jmap:mail'], 'methodCalls': method_calls}
-        r = self._post_request(request)
+        r = self._post_request(method_calls)
         method_responses = r.json()['methodResponses']
         return [{'id': email['id'], 'subject': email['subject']} for email in method_responses[3][1]['list']]
 
@@ -123,8 +139,7 @@ class EmailServer:
                 "fetchHTMLBodyValues": True
             }, "0"]
         ]
-        request = {'using': ['urn:ietf:params:jmap:mail'], 'methodCalls': method_calls}
-        r = self._post_request(request)
+        r = self._post_request(method_calls)
         method_responses = r.json()['methodResponses']
         return list(method_responses[0][1]['list'][0]['bodyValues'].values())[0]['value']
 
@@ -196,15 +211,10 @@ class Storage:
             self._create_tables()
 
     @property
-    def has_folders(self):
-        result = self._conn.execute('SELECT COUNT(*) FROM folders').fetchone()
-        if int(result[0]) > 0:
-            return True
-
-    @property
     def folders_state(self):
         result = self._conn.execute("SELECT value FROM misc WHERE key = 'folders-state'").fetchone()
-        return result[0]
+        if result:
+            return result[0]
 
     def delete_folders(self):
         cursor = self._conn.cursor()
@@ -219,6 +229,13 @@ class Storage:
                 cursor.execute('INSERT INTO folders(server_id, name, role, parent_server_id, sort_order) VALUES(?, ?, ?, ?, ?)',
                                (f['id'], f['name'], f['role'], f['parent_id'], f['sort_order']))
             cursor.execute('INSERT INTO misc(key, value) VALUES(?, ?)', ('folders-state', state))
+
+    def update_folders(self, folder_changes, state):
+        cursor = self._conn.cursor()
+        with sqlite_txn(cursor):
+            print(state)
+            print(folder_changes)
+            # cursor.execute('UPDATE misc SET value = ? WHERE key = ?', (state, 'folders-state'))
 
     def get_folders(self, parent_id=None):
         fields = 'server_id, name'
@@ -240,18 +257,14 @@ if __name__ == '__main__':
     storage = Storage(email_file)
     server = EmailServer()
 
-    if not storage.has_folders:
+    if not storage.folders_state:
         print(f'Fetching folders for the first time...')
         state, folders = server.get_folders()
         storage.save_folders(folders, state)
-    elif server.initial_state != storage.folders_state:
-        print(f'Folders may have changed - re-fetching...')
-        print(f'server state "{server.initial_state}"; storage state: "{storage.folders_state}"')
-        storage.delete_folders()
-        state, folders = server.get_folders()
-        storage.save_folders(folders, state)
     else:
-        print(f'No folder changes to fetch.')
+        print(f'Checking for folder updates...')
+        state, folder_changes = server.get_folder_changes(storage.folders_state)
+        storage.update_folders(folder_changes, state)
 
     folders = storage.get_folders()
     for f in folders:
