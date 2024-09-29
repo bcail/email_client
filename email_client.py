@@ -63,17 +63,29 @@ class EmailServer:
     def get_folder_changes(self, state):
         method_calls = [
             ['Mailbox/changes', {'accountId': self.account_id, 'sinceState': state}, '0'],
-            # ['Mailbox/get', {'#ids': { 'resultOf': '0', 'name': 'Mailbox/changes', 'path': '/created' }}, '1'],
+            ['Mailbox/get',
+             {'accountId': self.account_id, '#ids': { 'resultOf': '0', 'name': 'Mailbox/changes', 'path': '/created' }},
+             '1'],
+            ['Mailbox/get',
+             {'accountId': self.account_id, '#ids': { 'resultOf': '0', 'name': 'Mailbox/changes', 'path': '/updated' }},
+             '2'],
         ]
         r = self._post_request(method_calls)
         method_responses = r.json()['methodResponses']
         mailbox_changes_info = method_responses[0][1]
         new_state = mailbox_changes_info['newState']
         changes = {
-            'created': mailbox_changes_info['created'],
-            'destroyed': mailbox_changes_info['destroyed'],
-            'updated': mailbox_changes_info['updated'],
+            'created': [],
+            'deleted': [{'id': id} for id in mailbox_changes_info['destroyed']],
+            'updated': [],
         }
+        if mailbox_changes_info['created']:
+            changes['created'] = [{'id': m['id'], 'name': m['name'], 'role': m['role'], 'parent_id': m['parentId'], 'sort_order': m['sortOrder']}
+                                  for m in method_responses[1][1]['list']]
+        # don't worry about counts at this point - only update folders that have had properties updated
+        if mailbox_changes_info['updated'] and not mailbox_changes_info['updatedProperties']:
+            changes['updated'] = [{'id': m['id'], 'name': m['name'], 'role': m['role'], 'parent_id': m['parentId'], 'sort_order': m['sortOrder']}
+                                  for m in method_responses[2][1]['list']]
         return new_state, changes
 
     def get_emails(self, folder_id, limit=10):
@@ -233,9 +245,18 @@ class Storage:
     def update_folders(self, folder_changes, state):
         cursor = self._conn.cursor()
         with sqlite_txn(cursor):
-            print(state)
-            print(folder_changes)
-            # cursor.execute('UPDATE misc SET value = ? WHERE key = ?', (state, 'folders-state'))
+            for f in folder_changes['created']:
+                print(f'creating folder {f}')
+                cursor.execute('INSERT INTO folders(server_id, name, role, parent_server_id, sort_order) VALUES(?, ?, ?, ?, ?)',
+                               (f['id'], f['name'], f['role'], f['parent_id'], f['sort_order']))
+            for f in folder_changes['updated']:
+                print(f'updating folder {f}')
+                cursor.execute('UPDATE folders SET name=?, role=?, parent_server_id=?, sort_order=? WHERE server_id=?',
+                               (f['name'], f['role'], f['parent_id'], f['sort_order'], f['id']))
+            for f in folder_changes['deleted']:
+                print(f'deleting folder {f}')
+                cursor.execute('DELETE FROM folders WHERE server_id=?', (f['id'],))
+            cursor.execute('UPDATE misc SET value = ? WHERE key = ?', (state, 'folders-state'))
 
     def get_folders(self, parent_id=None):
         fields = 'server_id, name'
@@ -250,7 +271,7 @@ class Storage:
 
 if __name__ == '__main__':
     import requests
-    import markdownify
+    # import markdownify
 
     email_file = os.environ['EMAIL_FILE']
 
