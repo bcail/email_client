@@ -3,6 +3,8 @@ from contextlib import contextmanager
 import json
 import os
 import sqlite3
+import tkinter as tk
+from tkinter import ttk
 
 
 # https://jmap.io/spec-core.html
@@ -269,6 +271,36 @@ class Storage:
         return folders
 
 
+class GUI:
+
+    def __init__(self, storage):
+        self.storage = storage
+
+        self.root = tk.Tk()
+        self.root.title('Email Client')
+
+        #make sure root container is set to resize properly
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
+
+        #this frame will contain everything the user sees
+        self.content_frame = ttk.Frame(master=self.root, padding=(1, 1, 1, 1))
+        self.content_frame.columnconfigure(0, weight=1)
+        self.content_frame.rowconfigure(0, weight=1)
+        self.content_frame.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
+
+        columns = ('name')
+        folders_tree = ttk.Treeview(master=self.content_frame, columns=columns, show='headings')
+        folders_tree.heading('name', text='Name')
+
+        folders = storage.get_folders()
+        for f in folders:
+            values = (f['name'],)
+            folders_tree.insert(parent='', index=tk.END, iid=f['id'], values=values)
+
+        folders_tree.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
+
+
 if __name__ == '__main__':
     import requests
     # import markdownify
@@ -290,6 +322,9 @@ if __name__ == '__main__':
     folders = storage.get_folders()
     for f in folders:
         print(f'{f["id"]} -- {f["name"]}')
+
+    app = GUI(storage)
+    app.root.mainloop()
 
     # emails = server.get_emails(folders[0]['id'])
     # for index, email in enumerate(emails):
