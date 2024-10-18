@@ -125,12 +125,15 @@ class EmailServer:
                     "path": "/list/*/emailIds",
                     "resultOf": "2"
                 },
-                "properties": [ "subject", "from" ]
+                "properties": ['subject', 'from', 'sentAt']
             }, "3" ]
         ]
         r = self._post_request(method_calls)
         method_responses = r.json()['methodResponses']
-        return [{'id': email['id'], 'subject': email['subject']} for email in method_responses[3][1]['list']]
+        return [
+            {'id': e['id'], 'subject': e['subject'], 'from': e['from'], 'sent_at': e['sentAt']}
+            for e in method_responses[3][1]['list']
+        ]
 
     def get_email_html_data(self, email_id):
         method_calls = [
@@ -270,11 +273,17 @@ class Storage:
         folders.extend([{'id': r[0], 'name': r[1]} for r in results])
         return folders
 
+    def get_folder(self, folder_id):
+        fields = 'server_id, name'
+        folder = self._conn.execute(f'SELECT {fields} FROM folders WHERE server_id = ?', (folder_id,)).fetchone()
+        return {'id': folder[0], 'name': folder[1]}
+
 
 class GUI:
 
-    def __init__(self, storage):
+    def __init__(self, storage, server):
         self.storage = storage
+        self.server = server
 
         self.root = tk.Tk()
         self.root.title('Email Client')
@@ -286,19 +295,60 @@ class GUI:
         #this frame will contain everything the user sees
         self.content_frame = ttk.Frame(master=self.root, padding=(1, 1, 1, 1))
         self.content_frame.columnconfigure(0, weight=1)
+        self.content_frame.columnconfigure(1, weight=1)
         self.content_frame.rowconfigure(0, weight=1)
         self.content_frame.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
 
-        columns = ('name')
-        folders_tree = ttk.Treeview(master=self.content_frame, columns=columns, show='headings')
-        folders_tree.heading('name', text='Name')
+        self.emails_frame = None
 
-        folders = storage.get_folders()
+        self.show_folders()
+
+    def show_folders(self):
+        columns = ('name')
+        self.folders_tree = ttk.Treeview(master=self.content_frame, columns=columns, show='headings')
+        self.folders_tree.heading('name', text='Folders')
+
+        folders = self.storage.get_folders()
         for f in folders:
             values = (f['name'],)
-            folders_tree.insert(parent='', index=tk.END, iid=f['id'], values=values)
+            self.folders_tree.insert(parent='', index=tk.END, iid=f['id'], values=values)
 
-        folders_tree.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
+        self.folders_tree.bind('<Button-1>', self._folder_selected)
+        self.folders_tree.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
+
+        self.show_emails(folder_id=folders[0]['id'])
+
+    def _folder_selected(self, event):
+        folder_id = self.folders_tree.identify_row(event.y)
+        self.show_emails(folder_id=folder_id)
+
+    def show_emails(self, folder_id=None):
+        if self.emails_frame:
+            self.emails_frame.destroy()
+
+        self.emails_frame = ttk.Frame(master=self.content_frame)
+        self.emails_frame.columnconfigure(0, weight=1)
+        self.emails_frame.rowconfigure(1, weight=1)
+
+        if folder_id:
+            folder_info = self.storage.get_folder(folder_id)
+            ttk.Label(master=self.emails_frame, text=folder_info['name']).grid(row=0, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
+
+            self.emails = self.server.get_emails(folder_id=folder_info['id'])
+
+            columns = ('subject', 'from', 'sent_at')
+            self.emails_tree = ttk.Treeview(master=self.emails_frame, columns=columns, show='headings')
+            self.emails_tree.heading('subject', text='Subject')
+            self.emails_tree.heading('from', text='From')
+            self.emails_tree.heading('sent_at', text='Date')
+
+            for index, email in enumerate(self.emails):
+                values = (email['subject'], email['from'][0]['name'], email['sent_at'])
+                self.emails_tree.insert(parent='', index=tk.END, iid=index, values=values)
+
+            self.emails_tree.grid(row=1, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
+
+        self.emails_frame.grid(row=0, column=1, sticky=(tk.N, tk.W, tk.S, tk.E))
 
 
 if __name__ == '__main__':
@@ -323,7 +373,7 @@ if __name__ == '__main__':
     for f in folders:
         print(f'{f["id"]} -- {f["name"]}')
 
-    app = GUI(storage)
+    app = GUI(storage, server)
     app.root.mainloop()
 
     # emails = server.get_emails(folders[0]['id'])
