@@ -296,10 +296,12 @@ class GUI:
         self.content_frame = ttk.Frame(master=self.root, padding=(1, 1, 1, 1))
         self.content_frame.columnconfigure(0, weight=1)
         self.content_frame.columnconfigure(1, weight=1)
+        self.content_frame.columnconfigure(2, weight=2)
         self.content_frame.rowconfigure(0, weight=1)
         self.content_frame.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
 
         self.emails_frame = None
+        self.email_frame = None
 
         self.show_folders()
 
@@ -316,7 +318,7 @@ class GUI:
         self.folders_tree.bind('<Button-1>', self._folder_selected)
         self.folders_tree.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
 
-        self.show_emails(folder_id=folders[0]['id'])
+        self.show_emails()
 
     def _folder_selected(self, event):
         folder_id = self.folders_tree.identify_row(event.y)
@@ -346,9 +348,36 @@ class GUI:
                 values = (email['subject'], email['from'][0]['name'], email['sent_at'])
                 self.emails_tree.insert(parent='', index=tk.END, iid=index, values=values)
 
+            self.emails_tree.bind('<Button-1>', self._email_selected)
+
             self.emails_tree.grid(row=1, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
+        else:
+            ttk.Label(master=self.emails_frame, text='Emails').grid(row=0, column=0, sticky=(tk.N, tk.W, tk.E))
 
         self.emails_frame.grid(row=0, column=1, sticky=(tk.N, tk.W, tk.S, tk.E))
+
+    def _email_selected(self, event):
+        email_index = self.emails_tree.identify_row(event.y)
+        email_server_id = self.emails[int(email_index)]['id']
+
+        self.show_email(email_server_id=email_server_id)
+
+    def show_email(self, email_server_id):
+        if self.email_frame:
+            self.email_frame.destroy()
+
+        from tkinter.scrolledtext import ScrolledText
+
+        self.email_frame = ttk.Frame(master=self.content_frame)
+        self.email_frame.columnconfigure(0, weight=1)
+        self.email_frame.rowconfigure(1, weight=1)
+
+        ttk.Label(master=self.email_frame, text=f'Email {email_server_id}').grid(row=0, column=0, sticky=(tk.N, tk.W, tk.E))
+        email_body = self.server.get_email_html_data(email_server_id)
+        text_widget = ScrolledText(master=self.email_frame)
+        text_widget.insert(tk.END, email_body)
+        text_widget.grid(row=1, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
+        self.email_frame.grid(row=0, column=2, sticky=(tk.N, tk.W, tk.S, tk.E))
 
 
 if __name__ == '__main__':
