@@ -98,7 +98,6 @@ class EmailServer:
                 "sort": [{"property": "receivedAt", "isAscending": False }],
                 "collapseThreads": False, "position": 0, "limit": 20
             }, "0" ],
-            # Then we fetch the threadId of each of those messages
             [ "Email/get", {
                 "accountId": self.account_id,
                 "#ids": {
@@ -106,33 +105,14 @@ class EmailServer:
                     "path": "/ids",
                     "resultOf": "0"
                 },
-                "properties": [ "threadId" ]
-            }, "1" ],
-            # Next we get the emailIds of the messages in those threads
-            [ "Thread/get", {
-                "accountId": self.account_id,
-                "#ids": {
-                    "name": "Email/get",
-                    "path": "/list/*/threadId",
-                    "resultOf": "1"
-                }
-            }, "2" ],
-            # Finally we get the data for all those emails
-            [ "Email/get", {
-                "accountId": self.account_id,
-                "#ids": {
-                    "name": "Thread/get",
-                    "path": "/list/*/emailIds",
-                    "resultOf": "2"
-                },
                 "properties": ['subject', 'from', 'sentAt']
-            }, "3" ]
+            }, "1" ],
         ]
         r = self._post_request(method_calls)
         method_responses = r.json()['methodResponses']
         return [
             {'id': e['id'], 'subject': e['subject'], 'from': e['from'], 'sent_at': e['sentAt']}
-            for e in method_responses[3][1]['list']
+            for e in method_responses[1][1]['list']
         ]
 
     def get_email_html_data(self, email_id):
