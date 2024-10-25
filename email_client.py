@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 from contextlib import contextmanager
+import email
+import email.policy as email_policy
 import json
 import os
 import sqlite3
@@ -15,15 +17,18 @@ class EmailServer:
 
     def __init__(self):
         self._token = os.environ['TOKEN']
-        self._headers = {'Authorization': f'Bearer {self._token}', 'Content-type': 'application/json'}
+        self._authorization = f'Bearer {self._token}'
+        self._headers = {'Authorization': self._authorization, 'Content-type': 'application/json'}
         self._account_id = None
         self._api_url = None
+        self._download_url = None
 
     def _init_session(self):
         session_response = requests.get(os.environ['SESSION_URL'], headers=self._headers)
         session_info = session_response.json()
         self._account_id = session_info['primaryAccounts']['urn:ietf:params:jmap:mail']
         self._api_url = session_info['apiUrl']
+        self._download_url = session_info['downloadUrl']
 
     def _post_request(self, method_calls):
         request = {
@@ -50,6 +55,13 @@ class EmailServer:
         if not self._api_url:
             self._init_session()
         return self._api_url
+
+    @property
+    def download_url(self):
+        # eg. https://localhost/jmap/download/{accountId}/{blobId}/{name}?type={type}
+        if not self._download_url:
+            self._init_session()
+        return self._download_url
 
     def get_folders(self):
         method_calls = [
@@ -105,40 +117,22 @@ class EmailServer:
                     "path": "/ids",
                     "resultOf": "0"
                 },
-                "properties": ['subject', 'from', 'sentAt']
+                "properties": ['subject', 'from', 'sentAt', 'blobId']
             }, "1" ],
         ]
         r = self._post_request(method_calls)
         method_responses = r.json()['methodResponses']
         return [
-            {'id': e['id'], 'subject': e['subject'], 'from': e['from'], 'sent_at': e['sentAt']}
+            {'id': e['id'], 'subject': e['subject'], 'from': e['from'], 'sent_at': e['sentAt'], 'blob_id': e['blobId']}
             for e in method_responses[1][1]['list']
         ]
 
-    def get_email_html_data(self, email_id):
-        method_calls = [
-            [ "Email/get", {
-                "accountId": self.account_id,
-                "ids": [ email_id ],
-                "properties": [
-                    "blobId",
-                    "messageId",
-                    "inReplyTo",
-                    "references",
-                    "sender",
-                    "cc",
-                    "bcc",
-                    "replyTo",
-                    "sentAt",
-                    "htmlBody",
-                    "bodyValues"
-                ],
-                "fetchHTMLBodyValues": True
-            }, "0"]
-        ]
-        r = self._post_request(method_calls)
-        method_responses = r.json()['methodResponses']
-        return list(method_responses[0][1]['list'][0]['bodyValues'].values())[0]['value']
+    def get_email_obj(self, blob_id):
+        url = self.download_url.replace('{accountId}', self.account_id).replace('{blobId}', blob_id).replace('{name}', 'email').replace('{type}', 'application/octet-stream')
+        r = requests.get(url, headers={'Authorization': self._authorization})
+        if r.ok:
+            return email.message_from_bytes(r.content, _class=email.message.EmailMessage, policy=email_policy.default)
+        raise Exception(f'server error downloading email: {r.status_code} -- {r.content.decode("utf8")}')
 
 
 @contextmanager
@@ -339,10 +333,11 @@ class GUI:
     def _email_selected(self, event):
         email_index = self.emails_tree.identify_row(event.y)
         email_server_id = self.emails[int(email_index)]['id']
+        blob_id = self.emails[int(email_index)]['blob_id']
 
-        self.show_email(email_server_id=email_server_id)
+        self.show_email(email_server_id=email_server_id, blob_id=blob_id)
 
-    def show_email(self, email_server_id):
+    def show_email(self, email_server_id, blob_id):
         if self.email_frame:
             self.email_frame.destroy()
 
@@ -353,16 +348,15 @@ class GUI:
         self.email_frame.rowconfigure(1, weight=1)
 
         ttk.Label(master=self.email_frame, text=f'Email {email_server_id}').grid(row=0, column=0, sticky=(tk.N, tk.W, tk.E))
-        email_body = self.server.get_email_html_data(email_server_id)
+        email_obj = self.server.get_email_obj(blob_id)
         text_widget = ScrolledText(master=self.email_frame)
-        text_widget.insert(tk.END, email_body)
+        text_widget.insert(tk.END, email_obj.get_body())
         text_widget.grid(row=1, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
         self.email_frame.grid(row=0, column=2, sticky=(tk.N, tk.W, tk.S, tk.E))
 
 
 if __name__ == '__main__':
     import requests
-    # import markdownify
 
     email_file = os.environ['EMAIL_FILE']
 
@@ -384,13 +378,3 @@ if __name__ == '__main__':
 
     app = GUI(storage, server)
     app.root.mainloop()
-
-    # emails = server.get_emails(folders[0]['id'])
-    # for index, email in enumerate(emails):
-    #     print(f'{index} -- {email}')
-    # while True:
-    #     response = input('select email (q to quit): ')
-    #     if response.lower() in ['q', '']:
-    #         break
-    #     html_data = server.get_email_html_data(emails[int(response)]['id'])
-    #     print(markdownify.markdownify(html_data))
