@@ -7,6 +7,7 @@ import os
 import sqlite3
 import tkinter as tk
 from tkinter import ttk
+from tkinter.scrolledtext import ScrolledText
 
 
 # https://jmap.io/spec-core.html
@@ -72,7 +73,8 @@ class EmailServer:
         method_responses = folders_info['methodResponses']
         mailbox_get_info = method_responses[0][1]
         state = mailbox_get_info['state']
-        return state, [{'id': m['id'], 'name': m['name'], 'role': m['role'], 'parent_id': m['parentId'], 'sort_order': m['sortOrder']} for m in mailbox_get_info['list']]
+        return state, [{'server_id': m['id'], 'name': m['name'], 'role': m['role'], 'parent_id': m['parentId'], 'sort_order': m['sortOrder']}
+                       for m in mailbox_get_info['list']]
 
     def get_folder_changes(self, state):
         method_calls = [
@@ -123,7 +125,7 @@ class EmailServer:
         r = self._post_request(method_calls)
         method_responses = r.json()['methodResponses']
         return [
-            {'id': e['id'], 'subject': e['subject'], 'from': e['from'], 'sent_at': e['sentAt'], 'blob_id': e['blobId']}
+            {'server_id': e['id'], 'subject': e['subject'], 'from': e['from'], 'sent_at': e['sentAt'], 'blob_id': e['blobId']}
             for e in method_responses[1][1]['list']
         ]
 
@@ -218,7 +220,7 @@ class Storage:
         with sqlite_txn(cursor):
             for f in folders:
                 cursor.execute('INSERT INTO folders(server_id, name, role, parent_server_id, sort_order) VALUES(?, ?, ?, ?, ?)',
-                               (f['id'], f['name'], f['role'], f['parent_id'], f['sort_order']))
+                               (f['server_id'], f['name'], f['role'], f['parent_id'], f['sort_order']))
             cursor.execute('INSERT INTO misc(key, value) VALUES(?, ?)', ('folders-state', state))
 
     def update_folders(self, folder_changes, state):
@@ -244,7 +246,7 @@ class Storage:
             results = self._conn.execute(f'SELECT {fields} FROM folders WHERE parent_server_id = ? ORDER BY sort_order,name', (parent_id,)).fetchall()
         else:
             results = self._conn.execute(f'SELECT {fields} FROM folders WHERE parent_server_id IS NULL ORDER BY sort_order,name').fetchall()
-        folders.extend([{'id': r[0], 'name': r[1]} for r in results])
+        folders.extend([{'server_id': r[0], 'name': r[1]} for r in results])
         return folders
 
     def get_folder(self, folder_id):
@@ -287,7 +289,7 @@ class GUI:
         folders = self.storage.get_folders()
         for f in folders:
             values = (f['name'],)
-            self.folders_tree.insert(parent='', index=tk.END, iid=f['id'], values=values)
+            self.folders_tree.insert(parent='', index=tk.END, iid=f['server_id'], values=values)
 
         self.folders_tree.bind('<Button-1>', self._folder_selected)
         self.folders_tree.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
@@ -332,26 +334,24 @@ class GUI:
 
     def _email_selected(self, event):
         email_index = self.emails_tree.identify_row(event.y)
-        email_server_id = self.emails[int(email_index)]['id']
-        blob_id = self.emails[int(email_index)]['blob_id']
+        email_info = self.emails[int(email_index)]
+        blob_id = email_info['blob_id']
 
-        self.show_email(email_server_id=email_server_id, blob_id=blob_id)
+        self.show_email(blob_id=blob_id)
 
-    def show_email(self, email_server_id, blob_id):
+    def show_email(self, blob_id):
         if self.email_frame:
             self.email_frame.destroy()
 
-        from tkinter.scrolledtext import ScrolledText
-
         self.email_frame = ttk.Frame(master=self.content_frame)
         self.email_frame.columnconfigure(0, weight=1)
-        self.email_frame.rowconfigure(1, weight=1)
+        self.email_frame.rowconfigure(0, weight=1)
 
-        ttk.Label(master=self.email_frame, text=f'Email {email_server_id}').grid(row=0, column=0, sticky=(tk.N, tk.W, tk.E))
         email_obj = self.server.get_email_obj(blob_id)
         text_widget = ScrolledText(master=self.email_frame)
         text_widget.insert(tk.END, email_obj.get_body())
         text_widget.grid(row=1, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
+
         self.email_frame.grid(row=0, column=2, sticky=(tk.N, tk.W, tk.S, tk.E))
 
 
@@ -371,10 +371,6 @@ if __name__ == '__main__':
         print(f'Checking for folder updates...')
         state, folder_changes = server.get_folder_changes(storage.folders_state)
         storage.update_folders(folder_changes, state)
-
-    folders = storage.get_folders()
-    for f in folders:
-        print(f'{f["id"]} -- {f["name"]}')
 
     app = GUI(storage, server)
     app.root.mainloop()
