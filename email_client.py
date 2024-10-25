@@ -150,8 +150,16 @@ def sqlite_txn(cursor):
 
 class Storage:
     DB_INIT_STATEMENTS = [
+        'CREATE TABLE accounts ('
+            'id INTEGER PRIMARY KEY,'
+            'name TEXT NOT NULL UNIQUE,'
+            'type TEXT NOT NULL,'
+            'CHECK (name != ""),'
+            'CHECK (type = "JMAP" OR type = "IMAP" or type = "local")'
+            ') STRICT',
         'CREATE TABLE folders ('
             'id INTEGER PRIMARY KEY,'
+            'account_id INTEGER NOT NULL,'
             'server_id TEXT NOT NULL UNIQUE,'
             'name TEXT NOT NULL,'
             'parent_server_id TEXT NULL,'
@@ -160,17 +168,17 @@ class Storage:
             'CHECK (server_id != ""),'
             'CHECK (name != ""),'
             'CHECK (parent_server_id != ""),'
+            'FOREIGN KEY(account_id) REFERENCES accounts(id),'
             'FOREIGN KEY(parent_server_id) REFERENCES folders(server_id)'
             ') STRICT',
         'CREATE TABLE emails ('
             'id INTEGER PRIMARY KEY,'
             'folder_id INTEGER NOT NULL,'
             'from_header TEXT NOT NULL,'
-            'body TEXT NOT NULL,'
-            'CHECK (from_header != "")'
+            'CHECK (from_header != ""),'
             'FOREIGN KEY(folder_id) REFERENCES folders(id)'
             ') STRICT',
-        'CREATE TABLE attachments ('
+        'CREATE TABLE email_data ('
             'id INTEGER PRIMARY KEY,'
             'email_id INTEGER NOT NULL,'
             'data BLOB NOT NULL,'
@@ -215,12 +223,14 @@ class Storage:
             cursor.execute("DELETE FROM misc WHERE key = 'folders-state'")
             cursor.execute('DELETE FROM folders')
 
-    def save_folders(self, folders, state):
+    def save_folders(self, folders, state, account_name):
         cursor = self._conn.cursor()
         with sqlite_txn(cursor):
+            cursor.execute('INSERT INTO accounts(name, type) VALUES(?, ?)', (account_name, 'JMAP'))
+            account_id = cursor.lastrowid
             for f in folders:
-                cursor.execute('INSERT INTO folders(server_id, name, role, parent_server_id, sort_order) VALUES(?, ?, ?, ?, ?)',
-                               (f['server_id'], f['name'], f['role'], f['parent_id'], f['sort_order']))
+                cursor.execute('INSERT INTO folders(account_id, server_id, name, role, parent_server_id, sort_order) VALUES(?, ?, ?, ?, ?, ?)',
+                               (account_id, f['server_id'], f['name'], f['role'], f['parent_id'], f['sort_order']))
             cursor.execute('INSERT INTO misc(key, value) VALUES(?, ?)', ('folders-state', state))
 
     def update_folders(self, folder_changes, state):
@@ -366,7 +376,7 @@ if __name__ == '__main__':
     if not storage.folders_state:
         print(f'Fetching folders for the first time...')
         state, folders = server.get_folders()
-        storage.save_folders(folders, state)
+        storage.save_folders(folders, state, server.account_id)
     else:
         print(f'Checking for folder updates...')
         state, folder_changes = server.get_folder_changes(storage.folders_state)
