@@ -265,6 +265,125 @@ class Storage:
         return {'id': folder[0], 'name': folder[1]}
 
 
+class EmailDisplay:
+
+    def __init__(self, master, row, column, server):
+        self.server = server
+
+        self.frame = ttk.Frame(master=master)
+        self.frame.columnconfigure(0, weight=1)
+        self.frame.rowconfigure(0, weight=1)
+
+        self.label = None
+        self.text_widget = None
+
+        self.clear() # show blank column
+
+        self.frame.grid(row=row, column=column, sticky=(tk.N, tk.W, tk.S, tk.E))
+
+    def display_email(self, blob_id):
+        if self.label:
+            self.label.destroy()
+        email_obj = self.server.get_email_obj(blob_id)
+        self.text_widget = ScrolledText(master=self.frame)
+        self.text_widget.insert(tk.END, email_obj.get_body())
+        self.text_widget.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
+
+    def clear(self):
+        if self.label:
+            self.label.destroy()
+        if self.text_widget:
+            self.text_widget.destroy()
+        self.label = ttk.Label(master=self.frame, text=' ' * 10)
+        self.label.grid(row=0, column=0, sticky=(tk.W, tk.E))
+
+
+class EmailsListDisplay:
+
+    def __init__(self, master, row, column, storage, server, display_email):
+        self.storage = storage
+        self.server = server
+        self.display_email = display_email
+
+        self.frame = ttk.Frame(master=master)
+        self.frame.columnconfigure(0, weight=1)
+        self.frame.rowconfigure(0, weight=1)
+
+        self.frame.grid(row=row, column=column, sticky=(tk.N, tk.W, tk.S, tk.E))
+
+        self.emails_frame = None
+
+        self.display_emails()
+
+    def display_emails(self, folder_id=None):
+        if self.emails_frame:
+            self.emails_frame.destroy()
+
+        self.emails_frame = ttk.Frame(master=self.frame)
+        self.emails_frame.columnconfigure(0, weight=1)
+        self.emails_frame.rowconfigure(0, weight=1)
+
+        if folder_id:
+            folder_info = self.storage.get_folder(folder_id)
+
+            self.emails = self.server.get_emails(folder_id=folder_info['id'])
+
+            columns = ('subject', 'from', 'sent_at')
+            self.emails_tree = ttk.Treeview(master=self.emails_frame, columns=columns, show='headings')
+            self.emails_tree.heading('subject', text='Subject')
+            self.emails_tree.heading('from', text='From')
+            self.emails_tree.heading('sent_at', text='Date')
+
+            for index, email in enumerate(self.emails):
+                values = (email['subject'], email['from'][0]['name'] or '', email['sent_at'])
+                self.emails_tree.insert(parent='', index=tk.END, iid=index, values=values)
+
+            self.emails_tree.bind('<Button-1>', self._email_selected)
+
+            self.emails_tree.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
+        else:
+            ttk.Label(master=self.emails_frame, text='Emails').grid(row=0, column=0, sticky=(tk.N, tk.W, tk.E))
+
+        self.emails_frame.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
+
+    def _email_selected(self, event):
+        email_index = self.emails_tree.identify_row(event.y)
+        email_info = self.emails[int(email_index)]
+        blob_id = email_info['blob_id']
+
+        self.display_email(blob_id=blob_id)
+
+
+
+class AccountsDisplay:
+
+    def __init__(self, master, row, column, storage, display_emails):
+        self.storage = storage
+        self.display_emails = display_emails
+
+        self.frame = ttk.Frame(master=master)
+        self.frame.columnconfigure(0, weight=1)
+        self.frame.rowconfigure(0, weight=1)
+
+        columns = ('name')
+        self.folders_tree = ttk.Treeview(master=self.frame, columns=columns, show='headings')
+        self.folders_tree.heading('name', text='Folders')
+
+        folders = self.storage.get_folders()
+        for f in folders:
+            values = (f['name'],)
+            self.folders_tree.insert(parent='', index=tk.END, iid=f['server_id'], values=values)
+
+        self.folders_tree.bind('<Button-1>', self._folder_selected)
+        self.folders_tree.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
+
+        self.frame.grid(row=row, column=column, sticky=(tk.N, tk.W, tk.S, tk.E))
+
+    def _folder_selected(self, event):
+        folder_id = self.folders_tree.identify_row(event.y)
+        self.display_emails(folder_id=folder_id)
+
+
 class GUI:
 
     def __init__(self, storage, server):
@@ -273,6 +392,9 @@ class GUI:
 
         self.root = tk.Tk()
         self.root.title('Email Client')
+
+        w, h = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        self.root.geometry("%dx%d+0+0" % (w, h))
 
         #make sure root container is set to resize properly
         self.root.columnconfigure(0, weight=1)
@@ -286,83 +408,13 @@ class GUI:
         self.content_frame.rowconfigure(0, weight=1)
         self.content_frame.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
 
-        self.emails_frame = None
-        self.email_frame = None
+        self.email_display = EmailDisplay(master=self.content_frame, row=0, column=2, server=self.server)
 
-        self.show_folders()
+        self.folder_display = EmailsListDisplay(master=self.content_frame, row=0, column=1, storage=self.storage,
+                                            server=self.server, display_email=self.email_display.display_email)
 
-    def show_folders(self):
-        columns = ('name')
-        self.folders_tree = ttk.Treeview(master=self.content_frame, columns=columns, show='headings')
-        self.folders_tree.heading('name', text='Folders')
-
-        folders = self.storage.get_folders()
-        for f in folders:
-            values = (f['name'],)
-            self.folders_tree.insert(parent='', index=tk.END, iid=f['server_id'], values=values)
-
-        self.folders_tree.bind('<Button-1>', self._folder_selected)
-        self.folders_tree.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
-
-        self.show_emails()
-
-    def _folder_selected(self, event):
-        folder_id = self.folders_tree.identify_row(event.y)
-        self.show_emails(folder_id=folder_id)
-
-    def show_emails(self, folder_id=None):
-        if self.emails_frame:
-            self.emails_frame.destroy()
-
-        self.emails_frame = ttk.Frame(master=self.content_frame)
-        self.emails_frame.columnconfigure(0, weight=1)
-        self.emails_frame.rowconfigure(1, weight=1)
-
-        if folder_id:
-            folder_info = self.storage.get_folder(folder_id)
-            ttk.Label(master=self.emails_frame, text=folder_info['name']).grid(row=0, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
-
-            self.emails = self.server.get_emails(folder_id=folder_info['id'])
-
-            columns = ('subject', 'from', 'sent_at')
-            self.emails_tree = ttk.Treeview(master=self.emails_frame, columns=columns, show='headings')
-            self.emails_tree.heading('subject', text='Subject')
-            self.emails_tree.heading('from', text='From')
-            self.emails_tree.heading('sent_at', text='Date')
-
-            for index, email in enumerate(self.emails):
-                values = (email['subject'], email['from'][0]['name'], email['sent_at'])
-                self.emails_tree.insert(parent='', index=tk.END, iid=index, values=values)
-
-            self.emails_tree.bind('<Button-1>', self._email_selected)
-
-            self.emails_tree.grid(row=1, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
-        else:
-            ttk.Label(master=self.emails_frame, text='Emails').grid(row=0, column=0, sticky=(tk.N, tk.W, tk.E))
-
-        self.emails_frame.grid(row=0, column=1, sticky=(tk.N, tk.W, tk.S, tk.E))
-
-    def _email_selected(self, event):
-        email_index = self.emails_tree.identify_row(event.y)
-        email_info = self.emails[int(email_index)]
-        blob_id = email_info['blob_id']
-
-        self.show_email(blob_id=blob_id)
-
-    def show_email(self, blob_id):
-        if self.email_frame:
-            self.email_frame.destroy()
-
-        self.email_frame = ttk.Frame(master=self.content_frame)
-        self.email_frame.columnconfigure(0, weight=1)
-        self.email_frame.rowconfigure(0, weight=1)
-
-        email_obj = self.server.get_email_obj(blob_id)
-        text_widget = ScrolledText(master=self.email_frame)
-        text_widget.insert(tk.END, email_obj.get_body())
-        text_widget.grid(row=1, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
-
-        self.email_frame.grid(row=0, column=2, sticky=(tk.N, tk.W, tk.S, tk.E))
+        self.accounts_display = AccountsDisplay(master=self.content_frame, row=0, column=0, storage=self.storage,
+                                                display_emails=self.folder_display.display_emails)
 
 
 if __name__ == '__main__':
