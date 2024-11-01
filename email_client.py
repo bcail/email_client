@@ -265,6 +265,63 @@ class Storage:
         return {'id': folder[0], 'name': folder[1]}
 
 
+class EmailDisplay:
+
+    def __init__(self, master, row, column, server):
+        self.server = server
+
+        self.email_frame = ttk.Frame(master=master)
+        self.email_frame.columnconfigure(0, weight=1)
+        self.email_frame.rowconfigure(0, weight=1)
+        self.email_frame.rowconfigure(1, weight=5)
+
+        self.email_frame.grid(row=row, column=column, sticky=(tk.N, tk.W, tk.S, tk.E))
+
+        self.label = None
+        self.text_widget = None
+
+        self.clear() # show blank column
+
+    def show_email(self, blob_id):
+        print(f'display email {blob_id}')
+        email_obj = self.server.get_email_obj(blob_id)
+        self.text_widget = ScrolledText(master=self.email_frame)
+        self.text_widget.insert(tk.END, email_obj.get_body())
+        self.text_widget.grid(row=1, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
+
+    def clear(self):
+        if self.label:
+            self.label.destroy()
+        if self.text_widget:
+            self.text_widget.destroy()
+        self.label = ttk.Label(master=self.email_frame, text='')
+        self.label.grid(row=0, column=0, sticky=(tk.W, tk.E))
+
+
+class FolderDisplay:
+
+    def __init__(self, master, row, column, storage):
+        self.storage = storage
+
+        self.frame = ttk.Frame(master=master)
+        self.frame.columnconfigure(0, weight=1)
+        self.frame.rowconfigure(0, weight=1)
+
+        self.frame.grid(row=row, column=column, sticky=(tk.N, tk.W, tk.S, tk.E))
+
+
+class AccountsDisplay:
+
+    def __init__(self, master, row, column, storage):
+        self.storage = storage
+
+        self.frame = ttk.Frame(master=master)
+        self.frame.columnconfigure(0, weight=1)
+        self.frame.rowconfigure(0, weight=1)
+
+        self.frame.grid(row=row, column=column, sticky=(tk.N, tk.W, tk.S, tk.E))
+
+
 class GUI:
 
     def __init__(self, storage, server):
@@ -286,12 +343,13 @@ class GUI:
         self.content_frame.rowconfigure(0, weight=1)
         self.content_frame.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
 
-        self.emails_frame = None
-        self.email_frame = None
+        self.accounts_display = AccountsDisplay(master=self.content_frame, row=0, column=0, storage=self.storage)
 
-        self.show_folders()
+        self.folder_display = FolderDisplay(master=self.content_frame, row=0, column=1, storage=self.storage)
 
-    def show_folders(self):
+        self.email_display = EmailDisplay(master=self.content_frame, row=0, column=2, server=self.server)
+
+    def show_folders(self, folder_id):
         columns = ('name')
         self.folders_tree = ttk.Treeview(master=self.content_frame, columns=columns, show='headings')
         self.folders_tree.heading('name', text='Folders')
@@ -309,6 +367,7 @@ class GUI:
     def _folder_selected(self, event):
         folder_id = self.folders_tree.identify_row(event.y)
         self.show_emails(folder_id=folder_id)
+        self.email_display.clear()
 
     def show_emails(self, folder_id=None):
         if self.emails_frame:
@@ -347,22 +406,7 @@ class GUI:
         email_info = self.emails[int(email_index)]
         blob_id = email_info['blob_id']
 
-        self.show_email(blob_id=blob_id)
-
-    def show_email(self, blob_id):
-        if self.email_frame:
-            self.email_frame.destroy()
-
-        self.email_frame = ttk.Frame(master=self.content_frame)
-        self.email_frame.columnconfigure(0, weight=1)
-        self.email_frame.rowconfigure(0, weight=1)
-
-        email_obj = self.server.get_email_obj(blob_id)
-        text_widget = ScrolledText(master=self.email_frame)
-        text_widget.insert(tk.END, email_obj.get_body())
-        text_widget.grid(row=1, column=0, sticky=(tk.N, tk.W, tk.S, tk.E))
-
-        self.email_frame.grid(row=0, column=2, sticky=(tk.N, tk.W, tk.S, tk.E))
+        self.email_display.show_email(blob_id=blob_id)
 
 
 if __name__ == '__main__':
